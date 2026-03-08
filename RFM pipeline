@@ -1,0 +1,60 @@
+import pandas as pd
+
+print("Starting RFM pipeline...")
+
+# Load dataset
+df = pd.read_csv("data/RFM analysis data.csv")
+
+# Convert date column
+df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
+
+# Remove missing customers
+df = df.dropna(subset=['CustomerID'])
+
+# Snapshot date
+snapshot_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
+
+# RFM Calculation
+rfm = df.groupby('CustomerID').agg({
+    'InvoiceDate': lambda x: (snapshot_date - x.max()).days,
+    'InvoiceNo': 'nunique',
+    'LineAmount': 'sum'
+})
+
+rfm.columns = ['Recency', 'Frequency', 'MonetaryValue']
+rfm = rfm.reset_index()
+
+# Spend Rank
+rfm['SpendRank'] = rfm['MonetaryValue'].rank(method='first', ascending=False).astype(int)
+
+# RFM Scores (1-5 scale)
+rfm['R_Score'] = pd.qcut(rfm['Recency'], 5, labels=[5,4,3,2,1])
+rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 5, labels=[1,2,3,4,5])
+rfm['M_Score'] = pd.qcut(rfm['MonetaryValue'], 5, labels=[1,2,3,4,5])
+
+# Convert scores to integers
+rfm['R_Score'] = rfm['R_Score'].astype(int)
+rfm['F_Score'] = rfm['F_Score'].astype(int)
+rfm['M_Score'] = rfm['M_Score'].astype(int)
+
+# Create Segment column
+def segment_customer(row):
+    
+    if row['R_Score'] >= 4 and row['F_Score'] >= 4:
+        return "Champions"
+    
+    elif row['F_Score'] >= 4:
+        return "Loyalists"
+    
+    elif row['R_Score'] >= 3 and row['F_Score'] >= 2:
+        return "Potential"
+    
+    else:
+        return "Hibernating"
+
+rfm['Segment'] = rfm.apply(segment_customer, axis=1)
+
+# Save output
+rfm.to_csv("output/rfm_segmented_output.csv", index=False)
+
+print("RFM pipeline executed successfully!")
